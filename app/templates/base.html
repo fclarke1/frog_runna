@@ -7,12 +7,19 @@
 <style>
   :root {
     --bg: #f6f7f5; --card: #fff; --text: #1d2420; --muted: #6b7570; --line: #dfe3e0; --accent: #2f7d4f;
-    --easy: #d8f0df; --long: #d6e6fb; --quality: #fde2c8; --hard: #fbd3d3; --reps: #e6dbfa; --race: #fdf0b3;
+    --easy: #d8f0df; --long: #d6e6fb; --quality: #fde2c8; --hard: #fbd3d3; --intervals: #f9d6e4; --reps: #cdeee2;
+    --race: #fdf0b3;
+    /* Chart series, one per run type (validated categorical palette); chip tints above follow the same hues. */
+    --s-easy: #008300; --s-long: #2a78d6; --s-threshold: #eb6834; --s-intervals: #e87ba4; --s-reps: #1baf7a;
+    --s-unplanned: #eda100;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #151917; --card: #1e2421; --text: #e6ebe8; --muted: #95a09a; --line: #333b37; --accent: #6cc28f;
-      --easy: #22402d; --long: #22344d; --quality: #4a3420; --hard: #4d2626; --reps: #382b52; --race: #4a4218;
+      --easy: #22402d; --long: #22344d; --quality: #4a3420; --hard: #4d2626; --intervals: #4d2638; --reps: #1d4136;
+      --race: #4a4218;
+      --s-easy: #008300; --s-long: #3987e5; --s-threshold: #d95926; --s-intervals: #d55181; --s-reps: #199e70;
+      --s-unplanned: #c98500;
     }
   }
   * { box-sizing: border-box; }
@@ -45,7 +52,7 @@
   .k-easy, .k-strides { background: var(--easy); }
   .k-long { background: var(--long); }
   .k-cruise, .k-tempo { background: var(--quality); }
-  .k-intervals { background: var(--hard); }
+  .k-intervals { background: var(--intervals); }
   .k-reps { background: var(--reps); }
   .k-race { background: var(--race); font-weight: 700; }
   .k-run { background: transparent; border: 1px dashed var(--line); }
@@ -59,6 +66,7 @@
   <a class="brand" href="/">🐸 Frog Runna</a>
   <nav>
     <a href="/">Calendar</a>
+    <a href="/stats">Stats</a>
     <a href="/plan/new">New plan</a>
     <a href="/plan/update">Update plan</a>
   </nav>

@@ -51,3 +51,13 @@ def test_form_errors_are_shown(fake):
     soon = dict(FORM, race_date=(date.today() + timedelta(weeks=2)).isoformat())
     assert "weeks away" in c.post("/plan/new", data=soon).text
     assert "Check the times" in c.post("/plan/new", data=dict(FORM, current_5k="abc")).text
+
+
+def test_stats_page(fake):
+    c = TestClient(main.app)
+    fake.runs = [{"id": "i9", "type": "Run", "start_date_local": f"{date.today()}T07:00:00", "name": "Park loop",
+                  "distance": 5000, "moving_time": 1500, "average_heartrate": 150}]
+    c.post("/sync")
+    html = c.get("/stats", params={"weeks": 4}).text
+    assert "Pace by run type" in html and "Park loop" in html and 'data-run="0"' in html
+    assert c.get("/static/chart.umd.min.js").status_code == 200

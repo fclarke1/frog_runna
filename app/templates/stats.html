@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+{% block title %}Stats · Frog Runna{% endblock %}
+{% block content %}
+<style>
+  .filters { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+  .filters a { padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; text-decoration: none;
+               color: var(--text); background: var(--card); }
+  .filters a.on { border-color: var(--accent); font-weight: 700; }
+  .chart { position: relative; height: 260px; }
+  .runs tr[tabindex] { cursor: pointer; }
+  .runs tr[tabindex]:hover, .runs tr[tabindex]:focus { background: var(--bg); outline: none; }
+  .num { font-variant-numeric: tabular-nums; }
+  dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--text);
+           padding: 18px 20px; width: min(420px, calc(100vw - 32px)); }
+  dialog::backdrop { background: rgba(0, 0, 0, .35); }
+  dialog dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; margin: 12px 0; }
+  dialog dt { color: var(--muted); }
+  dialog dd { margin: 0; font-weight: 600; }
+  dialog h2 { margin: 0; }
+</style>
+
+<h1>Stats</h1>
+<div class="filters">
+  {% for n in [4, 12, 26, 52] %}
+  <a href="/stats?weeks={{ n }}" class="{{ 'on' if n == weeks }}">{{ '✓ ' if n == weeks }}Last {{ n }} weeks</a>
+  {% endfor %}
+</div>
+
+<div class="card stats">
+  <div><span class="muted">Distance</span><b>{{ data.total_km }} km</b></div>
+  <div><span class="muted">Runs</span><b>{{ data.total_runs }}</b></div>
+  <div><span class="muted">Average per week</span><b>{{ "%.1f"|format(data.total_km / weeks) }} km</b></div>
+  <div><span class="muted">This week</span><b>{{ data.weeks[-1].km }} / {{ data.weeks[-1].planned_km }} km</b></div>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0">Distance per week (km)</h2>
+  <div class="chart"><canvas id="distance" aria-label="Kilometres run per week, with planned kilometres"></canvas></div>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0">Runs per week</h2>
+  <div class="chart"><canvas id="runs" aria-label="Number of runs per week, with planned runs"></canvas></div>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0">Pace by run type (min/km)</h2>
+  <p class="muted" style="margin-top:0">Faster is higher. Intervals, threshold and repetition runs use the pace of
+    the hard parts only, not the warm-up and jogs.</p>
+  <div class="chart"><canvas id="pace" aria-label="Average pace per week for each type of run"></canvas></div>
+  <details style="margin-top:10px">
+    <summary>Show as a table</summary>
+    <div style="overflow-x:auto">
+      <table class="num" id="pace-table"></table>
+    </div>
+  </details>
+</div>
+
+<h2>Runs</h2>
+<div class="card" style="overflow-x:auto">
+  {% if data.runs %}
+  <table class="runs">
+    <tr><th>Date</th><th>Run</th><th>Type</th><th>km</th><th>Pace</th><th>HR</th></tr>
+    {% for r in data.runs %}
+    <tr tabindex="0" data-run="{{ loop.index0 }}">
+      <td>{{ r.date|nice_date }}</td>
+      <td>{{ r.name or 'Run' }}</td>
+      <td><span class="chip {{ {'Easy': 'k-easy', 'Long': 'k-long', 'Threshold': 'k-cruise', 'Intervals': 'k-intervals',
+                               'Repetitions': 'k-reps', 'Race': 'k-race'}.get(r.type, 'k-run') }}">{{ r.type }}</span></td>
+      <td class="num">{{ r.distance_km }}</td>
+      <td class="num">{{ fmt_pace(r.pace_s) if r.pace_s else '—' }}</td>
+      <td class="num">{{ r.avg_hr|round|int if r.avg_hr else '—' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p class="muted">Click a run for details.</p>
+  {% else %}
+  <p class="muted">No runs in this period yet.</p>
+  {% endif %}
+</div>
+
+<dialog id="run-dialog">
+  <h2 id="run-title"></h2>
+  <div class="muted" id="run-date"></div>
+  <dl id="run-details"></dl>
+  <p id="run-planned" class="muted"></p>
+  <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
+    <a id="run-icu" class="button" target="_blank" rel="noopener">Open in intervals.icu</a>
+    <a id="run-session" href="#">Planned session</a>
+    <form method="dialog" style="margin-left:auto"><button class="secondary">Close</button></form>
+  </div>
+</dialog>
+
+<script id="stats-data" type="application/json">{{ data|tojson }}</script>
+<script src="/static/chart.umd.min.js"></script>
+<script>
+const data = JSON.parse(document.getElementById("stats-data").textContent);
+const css = getComputedStyle(document.documentElement);
+const v = name => css.getPropertyValue(name).trim();
+
+const pace = s => { const r = Math.round(s); return `${Math.floor(r / 60)}:${String(r % 60).padStart(2, "0")}`; };
+const weekLabel = iso => new Date(iso + "T00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+const labels = data.weeks.map(w => weekLabel(w.start));
+
+Chart.defaults.font.family = "system-ui, sans-serif";
+Chart.defaults.color = v("--muted");
+Chart.defaults.borderColor = v("--line");
+Chart.defaults.maintainAspectRatio = false;
+Chart.defaults.plugins.legend.labels.usePointStyle = true;
+Chart.defaults.plugins.tooltip.mode = "index";
+Chart.defaults.plugins.tooltip.intersect = false;
+
+// A hairline that follows the pointer, so you aim at a week rather than at a 2px line.
+const crosshair = {
+  id: "crosshair",
+  afterDraw(chart) {
+    const active = chart.tooltip?.getActiveElements();
+    if (!active?.length) return;
+    const { ctx, chartArea } = chart, x = active[0].element.x;
+    ctx.save();
+    ctx.strokeStyle = v("--muted");
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, chartArea.top); ctx.lineTo(x, chartArea.bottom); ctx.stroke();
+    ctx.restore();
+  },
+};
+
+function barWithPlan(id, done, planned, doneLabel, unit, step) {
+  new Chart(document.getElementById(id), {
+    data: {
+      labels,
+      datasets: [
+        { type: "bar", label: doneLabel, data: done, backgroundColor: v("--accent"), borderRadius: 4,
+          borderSkipped: "start", maxBarThickness: 28, pointStyle: "rect", order: 2 },
+        { type: "line", label: "Planned", data: planned, borderColor: v("--muted"), borderWidth: 2,
+          borderDash: [5, 4], pointRadius: 0, pointHitRadius: 12, pointStyle: "line", order: 1 },
+      ],
+    },
+    options: {
+      scales: { x: { grid: { display: false } }, y: { beginAtZero: true, ticks: { stepSize: step } } },
+      plugins: { tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.formattedValue} ${unit}` } } },
+    },
+  });
+}
+barWithPlan("distance", data.weeks.map(w => w.km), data.weeks.map(w => w.planned_km), "Done", "km");
+barWithPlan("runs", data.weeks.map(w => w.runs), data.weeks.map(w => w.planned_runs), "Done", "runs", 1);
+
+// One line per run type, each with its own colour and marker shape.
+const TYPES = {
+  Easy: ["--s-easy", "circle"], Long: ["--s-long", "rect"], Threshold: ["--s-threshold", "triangle"],
+  Intervals: ["--s-intervals", "rectRot"], Repetitions: ["--s-reps", "star"], Unplanned: ["--s-unplanned", "crossRot"],
+};
+const types = data.types.filter(t => data.weeks.some(w => w.paces[t]));
+new Chart(document.getElementById("pace"), {
+  type: "line",
+  plugins: [crosshair],
+  data: {
+    labels,
+    datasets: types.map(t => ({
+      label: t, data: data.weeks.map(w => w.paces[t] ?? null), spanGaps: true,
+      borderColor: v(TYPES[t][0]), backgroundColor: v(TYPES[t][0]), pointStyle: TYPES[t][1],
+      borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, pointHitRadius: 12,
+    })),
+  },
+  options: {
+    scales: {
+      x: { grid: { display: false } },
+      y: { reverse: true, ticks: { callback: s => pace(s) } },
+    },
+    plugins: {
+      tooltip: { filter: c => c.raw !== null, callbacks: { label: c => `${pace(c.raw)}/km · ${c.dataset.label}` } },
+    },
+  },
+});
+
+// The pace chart as a table, so every value is readable without hovering.
+const table = document.getElementById("pace-table");
+const head = table.insertRow();
+["Week of", ...types].forEach(t => { const th = document.createElement("th"); th.textContent = t; head.appendChild(th); });
+data.weeks.forEach((w, i) => {
+  const row = table.insertRow();
+  row.insertCell().textContent = labels[i];
+  types.forEach(t => { row.insertCell().textContent = w.paces[t] ? pace(w.paces[t]) : "—"; });
+});
+
+// Run details pop-up.
+const dialog = document.getElementById("run-dialog");
+function showRun(r) {
+  document.getElementById("run-title").textContent = r.name || "Run";
+  document.getElementById("run-date").textContent =
+    new Date(r.date + "T00:00").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })
+    + " · " + r.type;
+  const secs = r.moving_time_s || 0;
+  const time = `${secs >= 3600 ? Math.floor(secs / 3600) + ":" : ""}${String(Math.floor(secs / 60) % 60).padStart(secs >= 3600 ? 2 : 1, "0")}:${String(secs % 60).padStart(2, "0")}`;
+  const rows = [
+    ["Distance", `${r.distance_km} km`],
+    ["Moving time", time],
+    ["Average pace", r.pace_s && `${pace(r.pace_s)}/km`],
+    ["Hard-part pace", r.work_pace_s && r.kind && ["intervals", "cruise", "tempo", "reps"].includes(r.kind) && `${pace(r.work_pace_s)}/km`],
+    ["Average HR", r.avg_hr && `${Math.round(r.avg_hr)} bpm`],
+    ["Max HR", r.max_hr && `${Math.round(r.max_hr)} bpm`],
+    ["Cadence", r.cadence_spm && `${Math.round(r.cadence_spm)} spm`],
+    ["Elevation gain", r.elevation_m != null && `${Math.round(r.elevation_m)} m`],
+    ["Training load", r.training_load],
+    ["Calories", r.calories],
+  ];
+  const dl = document.getElementById("run-details");
+  dl.replaceChildren();
+  rows.filter(([, val]) => val || val === 0).forEach(([label, val]) => {
+    const dt = document.createElement("dt"), dd = document.createElement("dd");
+    dt.textContent = label; dd.textContent = val;
+    dl.append(dt, dd);
+  });
+  document.getElementById("run-planned").textContent = r.session_id
+    ? `Planned: ${r.session_title}, ${r.planned_km} km. ${r.session_description}` : "Not part of the plan.";
+  document.getElementById("run-icu").href = `https://intervals.icu/activities/${encodeURIComponent(r.id)}`;
+  const session = document.getElementById("run-session");
+  session.hidden = !r.session_id;
+  session.href = `/session/${r.session_id}`;
+  dialog.showModal();
+}
+document.querySelectorAll(".runs tr[data-run]").forEach(tr => {
+  const open = () => showRun(data.runs[tr.dataset.run]);
+  tr.addEventListener("click", open);
+  tr.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
+});
+dialog.addEventListener("click", e => { if (e.target === dialog) dialog.close(); });  // click outside to close
+</script>
+{% endblock %}

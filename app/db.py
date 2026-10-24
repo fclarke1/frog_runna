@@ -43,6 +43,16 @@ CREATE TABLE IF NOT EXISTS activities (
 );
 """
 
+# Columns added after the first release: (table, column, type). Added to existing databases on connect.
+ADDED_COLUMNS = [
+    ("activities", "max_hr", "REAL"),
+    ("activities", "elevation_m", "REAL"),
+    ("activities", "cadence_spm", "REAL"),
+    ("activities", "training_load", "REAL"),
+    ("activities", "calories", "REAL"),
+    ("activities", "work_pace_s", "REAL"),  # pace of the hard parts of a quality session, s/km
+]
+
 
 def connect():
     os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
@@ -51,6 +61,9 @@ def connect():
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA)
+    for table, column, kind in ADDED_COLUMNS:
+        if column not in {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
     return conn
 
 

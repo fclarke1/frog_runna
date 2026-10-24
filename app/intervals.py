@@ -40,6 +40,17 @@ def delete_event(event_id):
             r.raise_for_status()
 
 
+def fetch_work_pace(activity_id):
+    """Pace (s/km) over the intervals intervals.icu marks as WORK, or None if there are none."""
+    with _client() as c:
+        r = c.get(f"https://intervals.icu/api/v1/activity/{activity_id}", params={"intervals": "true"})
+        r.raise_for_status()
+        work = [i for i in r.json().get("icu_intervals") or [] if i.get("type") == "WORK" and i.get("distance")]
+        if not work:
+            return None
+        return sum(i["moving_time"] for i in work) / (sum(i["distance"] for i in work) / 1000)
+
+
 def fetch_runs(oldest, newest):
     with _client() as c:
         r = c.get(f"{BASE}/activities", params={"oldest": str(oldest), "newest": str(newest)})

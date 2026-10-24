@@ -25,12 +25,15 @@ class FakeIntervals:
     def fetch_runs(self, oldest, newest):
         return self.runs
 
+    def fetch_work_pace(self, activity_id):
+        return None
+
 
 @pytest.fixture
 def fake(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "test.db"))
     f = FakeIntervals()
-    for name in ("create_event", "move_event", "delete_event", "fetch_runs"):
+    for name in ("create_event", "move_event", "delete_event", "fetch_runs", "fetch_work_pace"):
         monkeypatch.setattr(intervals, name, getattr(f, name))
     return f
 
@@ -153,3 +156,25 @@ def test_sync_matches_run_to_session(client, fake):
     assert sessions[0]["status"] == "done"
     assert sessions[0]["actual_km"] == 5.2
     assert sessions[0]["actual_pace"] == "5:50"
+
+
+def test_stats_weekly_totals_and_paces(client, fake, monkeypatch):
+    plan_id = approved_plan(client)
+    sessions = client.get(f"/api/plans/{plan_id}").json()["sessions"]
+    quality = next(s for s in sessions if s["kind"] in main.QUALITY_KINDS)
+    monkeypatch.setattr(main, "today", lambda: date.fromisoformat(quality["date"]))
+    monkeypatch.setattr(intervals, "fetch_work_pace", lambda _id: 280.0)
+    fake.runs = [
+        {"id": "q", "type": "Run", "start_date_local": f"{quality['date']}T07:00:00", "distance": 6000,
+         "moving_time": 2100, "average_cadence": 80},
+        {"id": "u", "type": "Run", "start_date_local": "2020-01-01T07:00:00", "distance": 1000, "moving_time": 400},
+    ]
+    client.post("/api/sync")
+    s = client.get("/api/stats", params={"weeks": 4}).json()
+    this_week = s["weeks"][-1]
+    assert len(s["weeks"]) == 4 and s["total_runs"] == 1  # the 2020 run is outside the range
+    assert this_week["km"] == 6.0 and this_week["runs"] == 1 and this_week["planned_runs"] >= 1
+    group = main.PACE_GROUPS[quality["kind"]]
+    assert this_week["paces"] == {group: 280.0}  # hard-part pace, not the 350 s/km average
+    run = s["runs"][0]
+    assert run["cadence_spm"] == 160 and run["type"] == group and run["session_title"] == quality["title"]

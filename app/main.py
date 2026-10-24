@@ -5,6 +5,7 @@ Every plan change goes through a proposal: create or update -> preview -> approv
 import asyncio
 import logging
 import os
+from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from typing import Literal
@@ -24,6 +25,11 @@ FEEL_ADJUST = {"much_easier": 2, "easier": 1, "harder": -1, "much_harder": -2}  
 FEEL_DISTANCE = {"much_easier": 1.2, "easier": 1.1, "harder": 0.9, "much_harder": 0.8}  # weekly km factor
 MIN_WEEKS, MAX_WEEKS = 6, 24
 SYNC_EVERY_S = 30 * 60
+HISTORY_DAYS = 365
+QUALITY_KINDS = ("intervals", "cruise", "tempo", "reps")
+# Run types on the stats page. Races are left out; one point a plan isn't a trend.
+PACE_GROUPS = {"easy": "Easy", "strides": "Easy", "long": "Long", "cruise": "Threshold", "tempo": "Threshold",
+               "intervals": "Intervals", "reps": "Repetitions", None: "Unplanned"}
 
 
 @asynccontextmanager
@@ -302,10 +308,66 @@ def _editable_session(conn, session_id):
 # --- Sync -------------------------------------------------------------------------------
 
 @app.post("/api/sync")
-def sync(conn=Depends(get_conn)):
+def sync(conn=Depends(get_conn), days: int = 30):
     pushed = push_pending(conn)
-    fetched, matched = pull_runs(conn)
+    fetched, matched = pull_runs(conn, days)
     return {"pushed": pushed, "runs_fetched": fetched, "runs_matched": matched}
+
+
+# --- Stats ------------------------------------------------------------------------------
+
+@app.get("/api/stats")
+def get_stats(weeks: int = 12, conn=Depends(get_conn)):
+    return stats(conn, weeks)
+
+
+def stats(conn, weeks):
+    """Per week (Monday to Sunday): km run vs planned, runs vs planned, and average pace per run type.
+
+    Paces are seconds per km. Quality sessions use the pace of their hard parts.
+    """
+    monday = today() - timedelta(days=today().weekday())
+    start = monday - timedelta(weeks=weeks - 1)
+    end = monday + timedelta(days=6)
+    runs = db.rows(conn, """
+        SELECT a.*, s.kind, s.title AS session_title, s.description AS session_description,
+               s.distance_km AS planned_km
+        FROM activities a LEFT JOIN sessions s ON s.id = a.session_id
+        WHERE a.date BETWEEN ? AND ? ORDER BY a.date DESC""", start.isoformat(), end.isoformat())
+    planned = db.rows(conn, """
+        SELECT s.date, s.distance_km FROM sessions s JOIN plans p ON p.id = s.plan_id
+        WHERE p.status IN ('active', 'archived') AND s.status != 'skipped' AND s.date BETWEEN ? AND ?""",
+        start.isoformat(), end.isoformat())
+
+    def week_of(d):
+        return (date.fromisoformat(d) - start).days // 7
+
+    result = [{"start": (start + timedelta(weeks=i)).isoformat(), "km": 0.0, "runs": 0, "planned_km": 0.0,
+               "planned_runs": 0, "paces": defaultdict(list)} for i in range(weeks)]
+    for s in planned:
+        w = result[week_of(s["date"])]
+        w["planned_km"] += s["distance_km"]
+        w["planned_runs"] += 1
+    for r in runs:
+        w = result[week_of(r["date"])]
+        w["km"] += r["distance_km"] or 0
+        w["runs"] += 1
+        r["pace_s"] = r["moving_time_s"] / r["distance_km"] if r["distance_km"] else None
+        r["type"] = PACE_GROUPS.get(r["kind"], "Race")
+        chart_pace = r["work_pace_s"] if r["kind"] in QUALITY_KINDS else r["pace_s"]
+        if r["kind"] != "race" and chart_pace:
+            w["paces"][r["type"]].append(chart_pace)
+    for w in result:
+        w["km"], w["planned_km"] = round(w["km"], 1), round(w["planned_km"], 1)
+        w["paces"] = {t: sum(p) / len(p) for t, p in w["paces"].items()}
+
+    return {
+        "weeks": result,
+        "types": list(dict.fromkeys(PACE_GROUPS.values())),
+        "runs": runs,
+        "total_km": round(sum(w["km"] for w in result), 1),
+        "total_runs": len(runs),
+    }
 
 
 def push_pending(conn):
@@ -326,12 +388,20 @@ def pull_runs(conn, days=30):
     runs = intervals.fetch_runs(today() - timedelta(days=days), today())
     for a in runs:
         conn.execute(
-            """INSERT INTO activities (id, date, name, distance_km, moving_time_s, avg_hr) VALUES (?, ?, ?, ?, ?, ?)
+            """INSERT INTO activities (id, date, name, distance_km, moving_time_s, avg_hr, max_hr, elevation_m,
+                                       cadence_spm, training_load, calories)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(id) DO UPDATE SET date = excluded.date, name = excluded.name,
                    distance_km = excluded.distance_km, moving_time_s = excluded.moving_time_s,
-                   avg_hr = excluded.avg_hr""",
+                   avg_hr = excluded.avg_hr, max_hr = excluded.max_hr, elevation_m = excluded.elevation_m,
+                   cadence_spm = excluded.cadence_spm, training_load = excluded.training_load,
+                   calories = excluded.calories""",
             (str(a["id"]), a["start_date_local"][:10], a.get("name"), round((a.get("distance") or 0) / 1000, 2),
-             a.get("moving_time"), a.get("average_heartrate")),
+             a.get("moving_time"), a.get("average_heartrate"), a.get("max_heartrate"),
+             a.get("total_elevation_gain"),
+             # Garmin reports running cadence per foot; steps per minute is double.
+             a["average_cadence"] * 2 if a.get("average_cadence") else None,
+             a.get("icu_training_load"), a.get("calories")),
         )
     matched = 0
     for a in db.rows(conn, "SELECT * FROM activities WHERE session_id IS NULL"):
@@ -341,7 +411,21 @@ def pull_runs(conn, days=30):
             conn.execute("UPDATE sessions SET status = 'done', activity_id = ? WHERE id = ?", (a["id"], s["id"]))
             matched += 1
     conn.commit()
+    _fill_work_paces(conn)
     return len(runs), matched
+
+
+def _fill_work_paces(conn):
+    """For runs done as a quality session, store the pace of the hard parts (their average pace includes jogs)."""
+    todo = db.rows(conn, f"""SELECT a.* FROM activities a JOIN sessions s ON s.id = a.session_id
+                             WHERE a.work_pace_s IS NULL AND s.kind IN ({",".join("?" * len(QUALITY_KINDS))})""",
+                   *QUALITY_KINDS)
+    for a in todo:
+        pace = intervals.fetch_work_pace(a["id"])
+        # Fall back to average pace so the run isn't fetched again on every sync.
+        fallback = a["moving_time_s"] / a["distance_km"] if a["distance_km"] else 0
+        conn.execute("UPDATE activities SET work_pace_s = ? WHERE id = ?", (pace or fallback, a["id"]))
+        conn.commit()
 
 
 def _session_for_run(conn, run_date):
@@ -356,11 +440,11 @@ def _session_for_run(conn, run_date):
     return None
 
 
-def _sync_once():
+def _sync_once(days):
     conn = db.connect()
     try:
         push_pending(conn)
-        pull_runs(conn)
+        pull_runs(conn, days)
     finally:
         conn.close()
 
@@ -369,9 +453,11 @@ async def _sync_loop():
     if not os.environ.get("INTERVALS_API_KEY"):
         log.warning("INTERVALS_API_KEY not set; background sync disabled.")
         return
+    days = HISTORY_DAYS  # first sync after start-up also fills in a year of history for the stats page
     while True:
         try:
-            await asyncio.to_thread(_sync_once)
+            await asyncio.to_thread(_sync_once, days)
+            days = 30
         except Exception:
             log.exception("Background sync failed")
         await asyncio.sleep(SYNC_EVERY_S)

@@ -9,14 +9,17 @@ from datetime import date, timedelta
 
 from fastapi import Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app import db
 from app.main import (DAYS, Move, NewPlan, PlanUpdate, _active_plan, app, approve_plan, delete_plan, get_conn,
-                      list_sessions, move_session, new_plan, plan_summary, skip_session, sync, today, update_plan)
+                      list_sessions, move_session, new_plan, plan_summary, skip_session, stats, sync, today, update_plan)
 from app.vdot import fmt_pace, fmt_time, paces
 
-templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
+HERE = os.path.dirname(__file__)
+app.mount("/static", StaticFiles(directory=os.path.join(HERE, "static")), name="static")
+templates = Jinja2Templates(directory=os.path.join(HERE, "templates"))
 templates.env.globals.update(fmt_pace=fmt_pace, fmt_time=fmt_time, DAYS=DAYS)
 templates.env.filters["nice_date"] = lambda d: date.fromisoformat(str(d)).strftime("%a %-d %b")
 
@@ -56,6 +59,12 @@ def calendar_page(request: Request, month: str | None = None, conn=Depends(get_c
     proposal = db.row(conn, "SELECT id FROM plans WHERE status = 'proposed'")
     return page(request, "calendar.html", rows=rows, first=first, today=today(), prev_month=prev_month,
                 next_month=next_month, active=_active_plan(conn), proposal=proposal)
+
+
+@app.get("/stats")
+def stats_page(request: Request, weeks: int = 12, conn=Depends(get_conn)):
+    weeks = weeks if weeks in (4, 12, 26, 52) else 12
+    return page(request, "stats.html", data=stats(conn, weeks), weeks=weeks)
 
 
 @app.post("/sync")
