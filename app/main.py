@@ -20,7 +20,8 @@ log = logging.getLogger("frog_runna")
 
 DISTANCES = {"5k": 5.0, "10k": 10.0, "half": 21.1, "marathon": 42.2}
 DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-FEEL_ADJUST = {"much_easier": 2, "easier": 1, "harder": -1, "much_harder": -2}
+FEEL_ADJUST = {"much_easier": 2, "easier": 1, "harder": -1, "much_harder": -2}  # VDOT points
+FEEL_DISTANCE = {"much_easier": 1.2, "easier": 1.1, "harder": 0.9, "much_harder": 0.8}  # weekly km factor
 MIN_WEEKS, MAX_WEEKS = 6, 24
 SYNC_EVERY_S = 30 * 60
 
@@ -61,8 +62,9 @@ class NewPlan(BaseModel):
 
 
 class PlanUpdate(BaseModel):
+    adjust: Literal["pace", "distance"] = "pace"
     feel: Literal["much_easier", "easier", "harder", "much_harder"] | None = None
-    new_5k: str | None = None  # a recent 5k time, instead of feel
+    new_5k: str | None = None  # a recent 5k time, instead of feel (pace only)
 
 
 @app.post("/api/plans")
@@ -94,15 +96,19 @@ def update_plan(body: PlanUpdate, conn=Depends(get_conn)):
     active = _active_plan(conn)
     if not active:
         raise HTTPException(404, "No active plan.")
-    if body.new_5k:
-        new_vdot = round(vdot(5000, parse_time(body.new_5k)), 1)
+    plan = {k: active[k] for k in ("race_name", "race_km", "race_date", "target_time_s", "vdot", "runs_per_week",
+                                   "long_run_day", "start_date", "start_weekly_km")}
+    if body.adjust == "distance":
+        if not body.feel:
+            raise HTTPException(400, "Choose how the sessions are feeling.")
+        # The plan is rebuilt from its first week, so scaling the start scales every week (up to the peak cap).
+        plan["start_weekly_km"] = round(active["start_weekly_km"] * FEEL_DISTANCE[body.feel], 1)
+    elif body.new_5k:
+        plan["vdot"] = round(vdot(5000, parse_time(body.new_5k)), 1)
     elif body.feel:
-        new_vdot = active["vdot"] + FEEL_ADJUST[body.feel]
+        plan["vdot"] = active["vdot"] + FEEL_ADJUST[body.feel]
     else:
         raise HTTPException(400, "Give either feel or new_5k.")
-    plan = {k: active[k] for k in ("race_name", "race_km", "race_date", "target_time_s", "runs_per_week",
-                                   "long_run_day", "start_date", "start_weekly_km")}
-    plan["vdot"] = new_vdot
     return {"plan_id": _propose(conn, plan, replaces=active["id"])}
 
 
@@ -214,13 +220,28 @@ def approve_plan(plan_id: int, conn=Depends(get_conn)):
 
 
 @app.delete("/api/plans/{plan_id}")
-def discard_plan(plan_id: int, conn=Depends(get_conn)):
-    if not db.row(conn, "SELECT id FROM plans WHERE id = ? AND status = 'proposed'", plan_id):
-        raise HTTPException(404, "No proposed plan with that id.")
-    conn.execute("DELETE FROM sessions WHERE plan_id = ?", (plan_id,))
-    conn.execute("DELETE FROM plans WHERE id = ?", (plan_id,))
+def delete_plan(plan_id: int, conn=Depends(get_conn)):
+    """Delete a plan of any status, removing its workouts from intervals.icu.
+
+    Runs stay in the activities table; ones that matched a session become unplanned runs.
+    """
+    if not db.row(conn, "SELECT id FROM plans WHERE id = ?", plan_id):
+        raise HTTPException(404, "Plan not found.")
+    pushed = db.rows(conn, "SELECT id, intervals_event_id FROM sessions WHERE plan_id = ? "
+                           "AND intervals_event_id IS NOT NULL", plan_id)
+    for s in pushed:
+        intervals.delete_event(s["intervals_event_id"])
+        conn.execute("UPDATE sessions SET intervals_event_id = NULL WHERE id = ?", (s["id"],))
+        conn.commit()  # per session, so a failure part way can just be retried
+    # Proposals to update this plan make no sense once it's gone.
+    doomed = [plan_id] + [p["id"] for p in db.rows(conn, "SELECT id FROM plans WHERE replaces_plan_id = ?", plan_id)]
+    for pid in doomed:
+        conn.execute("UPDATE activities SET session_id = NULL WHERE session_id IN "
+                     "(SELECT id FROM sessions WHERE plan_id = ?)", (pid,))
+        conn.execute("DELETE FROM sessions WHERE plan_id = ?", (pid,))
+        conn.execute("DELETE FROM plans WHERE id = ?", (pid,))
     conn.commit()
-    return {"discarded": plan_id}
+    return {"deleted": plan_id, "workouts_removed": len(pushed)}
 
 
 def _active_plan(conn):

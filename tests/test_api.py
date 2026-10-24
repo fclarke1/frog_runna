@@ -91,6 +91,37 @@ def test_update_needs_approval_then_replaces_future_sessions(client, fake):
     assert client.get(f"/api/plans/{old_id}").json()["plan"]["status"] == "archived"
 
 
+def test_delete_active_plan_removes_workouts_and_keeps_runs(client, fake):
+    plan_id = approved_plan(client)
+    first = client.get(f"/api/plans/{plan_id}").json()["sessions"][0]
+    fake.runs = [{"id": "i42", "type": "Run", "start_date_local": f"{first['date']}T07:00:00",
+                  "distance": 5000, "moving_time": 1800}]
+    client.post("/api/sync")
+    proposal_id = client.post("/api/plans/update", json={"feel": "harder"}).json()["plan_id"]
+
+    r = client.delete(f"/api/plans/{plan_id}").json()
+    assert r["workouts_removed"] > 0 and not fake.events
+    assert client.get(f"/api/plans/{plan_id}").status_code == 404
+    assert client.get(f"/api/plans/{proposal_id}").status_code == 404
+    day = date.fromisoformat(first["date"])
+    runs = client.get("/api/sessions", params={"start": day, "end": day}).json()
+    assert runs["sessions"] == [] and runs["unplanned_runs"][0]["id"] == "i42"
+    assert client.delete(f"/api/plans/{plan_id}").status_code == 404
+
+
+def test_update_distance_keeps_paces_and_adds_km(client, fake):
+    plan_id = approved_plan(client)
+    before = client.get(f"/api/plans/{plan_id}").json()
+    r = client.post("/api/plans/update", json={"adjust": "distance", "feel": "easier"})
+    after = client.get(f"/api/plans/{r.json()['plan_id']}").json()
+    assert after["paces_per_km"] == before["paces_per_km"]
+    assert after["plan"]["start_weekly_km"] == 16.5
+    first_week = lambda p: sum(s["distance_km"] for s in p["sessions"][:4])
+    assert first_week(after) > first_week(before)
+    assert after["changes"]
+    assert client.post("/api/plans/update", json={"adjust": "distance"}).status_code == 400
+
+
 def test_update_with_new_5k_and_discard(client, fake):
     approved_plan(client)
     plan_id = client.post("/api/plans/update", json={"new_5k": "23:30"}).json()["plan_id"]

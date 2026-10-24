@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}{{ s.title }} · Frog Runna{% endblock %}
+{% block content %}
+<p><a href="/?month={{ s.date[:7] }}">← Calendar</a></p>
+<h1><span class="chip k-{{ s.kind }}" style="display:inline-block; font-size:inherit">{{ s.title }}</span>
+  <span class="muted">· {{ s.date|nice_date }}</span></h1>
+
+<div class="card">
+  <p style="margin-top:0">{{ s.description }}</p>
+  <p class="muted">Planned: {{ s.distance_km }} km · Status: <b>{{ s.status }}</b></p>
+  <details><summary>Workout steps (as sent to the watch)</summary><pre>{{ s.workout_text }}</pre></details>
+</div>
+
+{% if run %}
+<h2>Your run</h2>
+<div class="card stats">
+  <div><span class="muted">Distance</span><b>{{ run.distance_km }} km</b></div>
+  <div><span class="muted">Time</span><b>{{ fmt_time(run.moving_time_s) }}</b></div>
+  <div><span class="muted">Avg pace</span><b>{{ fmt_pace(run.moving_time_s / run.distance_km) }}/km</b></div>
+  {% if run.avg_hr %}<div><span class="muted">Avg HR</span><b>{{ run.avg_hr|round|int }}</b></div>{% endif %}
+  {% if verdict %}<div><span class="muted">Easy pace</span><b>{{ verdict }}</b></div>{% endif %}
+</div>
+{% endif %}
+
+{% if editable %}
+<div class="card" style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap">
+  <form method="post" action="/session/{{ s.id }}/move" style="display:flex; gap:8px; align-items:flex-end">
+    <div><label for="new_date" style="margin-top:0">Move to</label>
+      <input id="new_date" name="new_date" type="date" value="{{ s.date }}" required></div>
+    <button>Move</button>
+  </form>
+  <form method="post" action="/session/{{ s.id }}/skip" onsubmit="return confirm('Skip this session?')">
+    <button class="secondary">Skip session</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

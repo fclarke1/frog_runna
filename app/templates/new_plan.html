@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}New plan · Frog Runna{% endblock %}
+{% block content %}
+<h1>New training plan</h1>
+{% if error %}<div class="error">{{ error }}</div>{% endif %}
+<form class="card" method="post" action="/plan/new">
+  <div class="grid2">
+    <div>
+      <label for="race_name">Race name</label>
+      <input id="race_name" name="race_name" required value="{{ form.race_name or '' }}" placeholder="Spring Half">
+    </div>
+    <div>
+      <label for="race_distance">Distance</label>
+      <select id="race_distance" name="race_distance">
+        {% for value, name in [("5k", "5k"), ("10k", "10k"), ("half", "Half marathon"), ("marathon", "Marathon")] %}
+        <option value="{{ value }}" {{ 'selected' if form.race_distance == value }}>{{ name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="race_date">Race date (6–24 weeks away)</label>
+      <input id="race_date" name="race_date" type="date" required value="{{ form.race_date or '' }}">
+    </div>
+    <div>
+      <label for="target_time">Target time</label>
+      <input id="target_time" name="target_time" required value="{{ form.target_time or '' }}" placeholder="1:50:00 or 21:30">
+    </div>
+    <div>
+      <label for="current_5k">Current 5k time</label>
+      <input id="current_5k" name="current_5k" required value="{{ form.current_5k or '' }}" placeholder="25:00">
+    </div>
+    <div>
+      <label for="weekly_km">Current km per week</label>
+      <input id="weekly_km" name="weekly_km" type="number" step="0.5" min="5" value="{{ form.weekly_km or 15 }}">
+    </div>
+    <div>
+      <label for="runs_per_week">Runs per week</label>
+      <select id="runs_per_week" name="runs_per_week">
+        {% for n in [2, 3, 4, 5] %}
+        <option {{ 'selected' if (form.runs_per_week or 4) == n }}>{{ n }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="long_run_day">Long run day</label>
+      <select id="long_run_day" name="long_run_day">
+        {% for day in DAYS %}
+        <option value="{{ day }}" {{ 'selected' if (form.long_run_day or 'saturday') == day }}>{{ day|title }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+  <p class="muted">You'll see the full plan before anything is sent to your watch.</p>
+  <button>Preview plan</button>
+</form>
+{% endblock %}

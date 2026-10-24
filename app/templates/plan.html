@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}{{ plan.race_name }} · Frog Runna{% endblock %}
+{% block content %}
+<h1>{{ plan.race_name }} <span class="muted">· {{ plan.race_date|nice_date }}</span></h1>
+
+{% if plan.status == 'proposed' %}
+<div class="banner">
+  This plan is a <b>proposal</b>. Nothing has been sent to your watch yet.
+  <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap">
+    <form method="post" action="/plan/{{ plan.id }}/approve"><button>Approve and send to watch</button></form>
+    <form method="post" action="/plan/{{ plan.id }}/delete"><button class="secondary">Discard</button></form>
+  </div>
+</div>
+{% endif %}
+
+<div class="card stats">
+  <div><span class="muted">Target</span><b>{{ s.target_race_time }}</b></div>
+  <div><span class="muted">Predicted now</span><b>{{ s.predicted_race_time }}</b></div>
+  <div><span class="muted">VDOT now / needed</span><b>{{ s.current_vdot }} / {{ s.target_vdot }}</b></div>
+  <div><span class="muted">Target looks</span><b>{{ s.feasibility }}</b></div>
+</div>
+
+<div class="card">
+  <b>Paces (min/km)</b>
+  <div class="stats" style="margin-top:6px">
+    <div><span class="muted">Easy</span><b>{{ s.paces_per_km.easy }}</b></div>
+    <div><span class="muted">Threshold</span><b>{{ s.paces_per_km.threshold }}</b></div>
+    <div><span class="muted">Interval</span><b>{{ s.paces_per_km.interval }}</b></div>
+    <div><span class="muted">Repetition</span><b>{{ s.paces_per_km.repetition }}</b></div>
+    <div><span class="muted">Race</span><b>{{ s.paces_per_km.race_target }}</b></div>
+  </div>
+</div>
+
+{% if s.changes is defined %}
+<h2>What changes</h2>
+<div class="card" style="overflow-x:auto">
+  {% if s.changes %}
+  <table>
+    <tr><th>Date</th><th>Before</th><th>After</th></tr>
+    {% for c in s.changes %}
+    <tr><td>{{ c.date|nice_date }}</td><td class="muted">{{ c.old or '—' }}</td><td>{{ c.new or '—' }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">No changes.</p>{% endif %}
+</div>
+{% endif %}
+
+<h2>Week by week</h2>
+{% for week_end, sessions in weeks %}
+<div class="card" style="overflow-x:auto">
+  <b>Week {{ loop.index }}</b>
+  <span class="muted">· to {{ week_end|nice_date }} · {{ "%.1f"|format(sessions|sum(attribute='distance_km')) }} km</span>
+  <table style="margin-top:6px">
+    {% for x in sessions %}
+    <tr class="st-{{ x.status }}">
+      <td style="width:95px">{{ x.date|nice_date }}</td>
+      <td style="width:190px"><a class="chip k-{{ x.kind }}" href="/session/{{ x.id }}">
+        {% if x.status == 'done' %}✓ {% endif %}{{ x.title }}</a></td>
+      <td style="width:60px">{{ x.distance_km }} km</td>
+      <td class="muted">{{ x.description }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endfor %}
+
+{% if plan.status == 'active' %}
+<form method="post" action="/plan/{{ plan.id }}/delete"
+      onsubmit="return confirm('Delete this plan and remove all its workouts from your watch?')">
+  <button class="danger">Delete plan</button>
+</form>
+{% endif %}
+{% endblock %}

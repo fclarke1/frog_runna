@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .cal { display: grid; grid-template-columns: repeat(7, 1fr) 70px; border: 1px solid var(--line);
+         border-radius: 10px; overflow: hidden; background: var(--card); }
+  .cal > div { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 4px; min-height: 84px; min-width: 0; }
+  .cal .head { min-height: 0; font-weight: 600; font-size: 12px; text-align: center; color: var(--muted); }
+  .cal .day-num { font-size: 12px; color: var(--muted); }
+  .cal .other { background: var(--bg); }
+  .cal .today .day-num { color: var(--accent); font-weight: 700; }
+  .cal .total { font-size: 12px; color: var(--muted); }
+  .top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  .top h1 { margin: 0; flex: 1; }
+  @media (max-width: 640px) {
+    .cal { grid-template-columns: repeat(7, 1fr); }
+    .cal .total, .cal .total-head { display: none; }
+    .cal > div { min-height: 64px; padding: 2px; }
+    .chip { font-size: 10px; padding: 1px 3px; }
+  }
+</style>
+
+{% if proposal %}
+<div class="banner">A plan is waiting for your approval. <a href="/plan/{{ proposal.id }}">Review it</a></div>
+{% endif %}
+{% if not active %}
+<div class="banner">No active plan. <a href="/plan/new">Create one</a> for your next race.</div>
+{% else %}
+<div class="card">
+  <b>{{ active.race_name }}</b> · {{ active.race_date|nice_date }} · target {{ fmt_time(active.target_time_s) }}
+  · VDOT {{ active.vdot }} · <a href="/plan/{{ active.id }}">View plan</a>
+</div>
+{% endif %}
+
+<div class="top">
+  <a href="/?month={{ prev_month }}">◀</a>
+  <h1>{{ first.strftime("%B %Y") }}</h1>
+  <a href="/?month={{ next_month }}">▶</a>
+  <form method="post" action="/sync"><button class="secondary">Sync now</button></form>
+</div>
+
+<div class="cal">
+  {% for name in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] %}<div class="head">{{ name }}</div>{% endfor %}
+  <div class="head total-head">Week km</div>
+  {% for row in rows %}
+    {% for d, sessions, runs in row.days %}
+    <div class="{{ 'other' if d.month != first.month }} {{ 'today' if d == today }}">
+      <div class="day-num">{{ d.day }}</div>
+      {% for s in sessions %}
+      <a class="chip k-{{ s.kind }} st-{{ s.status }}" href="/session/{{ s.id }}" title="{{ s.title }}">
+        {% if s.status == 'done' %}✓ {% endif %}{{ s.title }} {{ s.distance_km }}k</a>
+      {% endfor %}
+      {% for a in runs %}
+      <span class="chip k-run" title="Unplanned run">🏃 {{ a.distance_km }}k</span>
+      {% endfor %}
+    </div>
+    {% endfor %}
+    <div class="total">{{ "%.1f"|format(row.done_km) }} / {{ "%.1f"|format(row.planned_km) }}</div>
+  {% endfor %}
+</div>
+<p class="muted">Week km = run / planned. ✓ = done, struck through = skipped, dashed = a run not in the plan.</p>
+{% endblock %}

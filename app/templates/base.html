@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Frog Runna{% endblock %}</title>
+<style>
+  :root {
+    --bg: #f6f7f5; --card: #fff; --text: #1d2420; --muted: #6b7570; --line: #dfe3e0; --accent: #2f7d4f;
+    --easy: #d8f0df; --long: #d6e6fb; --quality: #fde2c8; --hard: #fbd3d3; --reps: #e6dbfa; --race: #fdf0b3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151917; --card: #1e2421; --text: #e6ebe8; --muted: #95a09a; --line: #333b37; --accent: #6cc28f;
+      --easy: #22402d; --long: #22344d; --quality: #4a3420; --hard: #4d2626; --reps: #382b52; --race: #4a4218;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; padding: 12px 16px; background: var(--card);
+           border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header .brand { font-weight: 700; color: var(--accent); text-decoration: none; font-size: 18px; }
+  header nav { display: flex; gap: 14px; flex-wrap: wrap; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  a { color: var(--accent); }
+  h1 { font-size: 22px; margin: 4px 0 12px; }
+  h2 { font-size: 17px; margin: 20px 0 8px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+  .muted { color: var(--muted); }
+  .banner { background: var(--race); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; }
+  .error { background: var(--hard); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; }
+  button, .button { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 8px 14px;
+                    font: inherit; cursor: pointer; text-decoration: none; display: inline-block; }
+  button.secondary { background: transparent; color: var(--text); border: 1px solid var(--line); }
+  button.danger { background: #b4413b; }
+  label { display: block; margin: 10px 0 4px; font-weight: 600; }
+  input, select { font: inherit; padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px;
+                  background: var(--bg); color: var(--text); width: 100%; max-width: 320px; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0 18px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  pre { background: var(--bg); padding: 10px; border-radius: 8px; overflow-x: auto; }
+  .chip { display: block; border-radius: 6px; padding: 2px 6px; margin: 2px 0; font-size: 12px;
+          text-decoration: none; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .k-easy, .k-strides { background: var(--easy); }
+  .k-long { background: var(--long); }
+  .k-cruise, .k-tempo { background: var(--quality); }
+  .k-intervals { background: var(--hard); }
+  .k-reps { background: var(--reps); }
+  .k-race { background: var(--race); font-weight: 700; }
+  .k-run { background: transparent; border: 1px dashed var(--line); }
+  .st-skipped { text-decoration: line-through; opacity: .55; }
+  .stats { display: flex; gap: 22px; flex-wrap: wrap; }
+  .stats div b { display: block; font-size: 20px; }
+</style>
+</head>
+<body>
+<header>
+  <a class="brand" href="/">🐸 Frog Runna</a>
+  <nav>
+    <a href="/">Calendar</a>
+    <a href="/plan/new">New plan</a>
+    <a href="/plan/update">Update plan</a>
+  </nav>
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

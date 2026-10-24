@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Update plan · Frog Runna{% endblock %}
+{% block content %}
+<h1>Update plan</h1>
+<p class="muted">{{ plan.race_name }} · current VDOT {{ plan.vdot }}. You'll see the changes before they're applied.</p>
+{% if error %}<div class="error">{{ error }}</div>{% endif %}
+<form class="card" method="post" action="/plan/update">
+  <h2 style="margin-top:0">What should change?</h2>
+  <label style="font-weight:400"><input type="radio" name="adjust" value="pace" checked style="width:auto">
+    <b>Pacing</b> <span class="muted">· faster or slower paces, same distances</span></label>
+  <label style="font-weight:400"><input type="radio" name="adjust" value="distance" style="width:auto">
+    <b>Distance per week</b> <span class="muted">· more or fewer km, same paces</span></label>
+
+  <h2>How are the sessions feeling?</h2>
+  {% for value, label, pace, km in [("much_easier", "A lot too easy", "+2", "+20%"),
+                                    ("easier", "A little too easy", "+1", "+10%"),
+                                    ("harder", "A little too hard", "−1", "−10%"),
+                                    ("much_harder", "A lot too hard", "−2", "−20%")] %}
+  <label style="font-weight:400"><input type="radio" name="feel" value="{{ value }}" style="width:auto">
+    {{ label }} <span class="muted">(pacing: VDOT {{ pace }} · distance: {{ km }} per week)</span></label>
+  {% endfor %}
+
+  <h2>…or enter a recent 5k time <span class="muted" style="font-weight:400">(pacing only)</span></h2>
+  <input name="new_5k" placeholder="23:30">
+  <p><button>Preview changes</button></p>
+</form>
+{% endblock %}
